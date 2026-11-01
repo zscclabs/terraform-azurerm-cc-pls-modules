@@ -1,0 +1,50 @@
+#cloud-config
+write_files:
+%{ if proxy_port != null ~}
+  - path: /etc/profile.d/zscaler-proxy.sh
+    permissions: "0644"
+    content: |
+      export http_proxy=http://${proxy_fqdn}:${proxy_port}
+      export https_proxy=http://${proxy_fqdn}:${proxy_port}
+      export HTTP_PROXY=$http_proxy
+      export HTTPS_PROXY=$https_proxy
+      export no_proxy=localhost,127.0.0.1,169.254.169.254,168.63.129.16
+  - path: /etc/apt/apt.conf.d/95zscaler-proxy
+    permissions: "0644"
+    content: |
+      Acquire::http::Proxy "http://${proxy_fqdn}:${proxy_port}";
+      Acquire::https::Proxy "http://${proxy_fqdn}:${proxy_port}";
+%{ endif ~}
+  - path: /usr/local/bin/proxy-test
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Usage: proxy-test [proxy_port]
+      FQDN="${proxy_fqdn}"
+      PORT="$${1:-${proxy_port == null ? "" : proxy_port}}"
+      rc=0
+      echo "== 1. DNS: $FQDN"
+      if getent hosts "$FQDN"; then echo "PASS"; else echo "FAIL: does not resolve"; rc=1; fi
+      # The CC health listener does not answer on the LB VIP (floating IP), so test the
+      # Private Link path with TCP connects through the Private Endpoint instead
+      echo "== 2. Private Link path to Cloud Connector (TCP via Private Endpoint)"
+      for p in ${join(" ", tcp_check_ports)}; do
+        if timeout 5 bash -c "</dev/tcp/$FQDN/$p" 2>/dev/null; then echo "PASS: tcp/$p connected"; else echo "FAIL: tcp/$p unreachable"; rc=1; fi
+      done
+      echo "== 3. Direct internet (expected to be BLOCKED)"
+      if curl -s -m 5 -o /dev/null --noproxy '*' https://www.google.com; then
+        echo "FAIL: direct internet reachable - VM is NOT private"; rc=1
+      else
+        echo "PASS: blocked"
+      fi
+      if [ -n "$PORT" ]; then
+        echo "== 4. Internet via Zscaler explicit proxy $FQDN:$PORT"
+        if out=$(curl -s -m 15 -x "http://$FQDN:$PORT" https://ip.zscaler.com); then
+          echo "PASS: $(echo "$out" | grep -io "you are accessing[^<]*\|not going through[^<]*" | head -1)"
+        else
+          echo "FAIL: no response via proxy"; rc=1
+        fi
+      else
+        echo "== 4. skipped (pass the explicit proxy port: proxy-test <port>)"
+      fi
+      exit $rc

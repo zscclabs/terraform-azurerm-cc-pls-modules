@@ -1,0 +1,36 @@
+# Terraform working files
+**/.terraform/*
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# State and plans (contain secrets such as generated SSH private keys and resource IDs)
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+
+# Environment-specific variable values
+*.auto.tfvars
+*.auto.tfvars.json
+private.tfvars
+
+# Generated locally by examples/cc_pls (private key, ssh_config with resource IDs, proxy helper)
+*.pem
+*.key
+examples/ssh_config
+examples/bastion-proxy.sh
+
+# Claude Code files
+CLAUDE.md
+CLAUDE.local.md
+**/CLAUDE.md
+**/CLAUDE.local.md
+.claude/
+
+# OS / editor
+.DS_Store

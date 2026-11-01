@@ -1,0 +1,26 @@
+#!/bin/bash
+# SSH ProxyCommand through Azure Bastion (Standard/Premium SKU, native client tunneling).
+# Opens a Bastion tunnel to the VM on a local port, relays stdin/stdout to it with nc,
+# and stops the tunnel when the SSH session ends.
+# Usage (from ssh_config): ProxyCommand <this script> <bastion> <resource-group> <vm-id> <local-port>
+BASTION="$1"; RG="$2"; VMID="$3"; PORT="$4"
+
+# Job control puts the tunnel in its own process group, so cleanup can stop the
+# az wrapper and its python child together
+set -m
+az network bastion tunnel -n "$BASTION" -g "$RG" --target-resource-id "$VMID" \
+  --resource-port 22 --port "$PORT" >/dev/null 2>&1 &
+TUNNEL_PGID=$!
+set +m
+
+cleanup() { kill -TERM -- "-$TUNNEL_PGID" 2>/dev/null; }
+trap cleanup EXIT
+trap 'exit 0' HUP INT TERM
+
+for _ in $(seq 1 120); do
+  nc -z 127.0.0.1 "$PORT" 2>/dev/null && break
+  kill -0 "$TUNNEL_PGID" 2>/dev/null || { echo "bastion tunnel failed to start (az login? az extension add -n ssh / update -n bastion?)" >&2; exit 1; }
+  sleep 0.5
+done
+
+nc 127.0.0.1 "$PORT"
